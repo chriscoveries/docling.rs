@@ -402,6 +402,11 @@
 //!   --redact-ner-min-score X
 //!                      the NER detector's minimum confidence, 0-1 (default 0.85).
 
+mod cleanup;
+
+#[cfg(test)]
+mod batch_cleanup_tests;
+
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -2793,6 +2798,9 @@ fn batch_convert_one(
     archives: &mut ArchiveCache,
     document_index: usize,
 ) -> Result<BatchOutcome, String> {
+    // Declared first: transient source/document/export buffers drop before the
+    // trim on success, early error and panic unwind. Warm state stays live.
+    let _trim = cleanup::trim_on_drop();
     let (file, base) = (item.file.as_path(), item.base.as_path());
     let label = item.label();
     // A merged archive (#677) has no one source: its document is the
