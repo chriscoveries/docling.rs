@@ -35,7 +35,10 @@ fn mcp_cleanup_on_success_preserves_response() {
             let _captured = captured;
             observe_trim(p, e.clone(), h);
             let _buffer = DropEvent(e.clone(), "buffer");
-            (String::from("response still live"), DropEvent(e, "response"))
+            (
+                String::from("response still live"),
+                DropEvent(e, "response"),
+            )
         })
         .await
         .unwrap();

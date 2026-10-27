@@ -40,7 +40,10 @@ pub(crate) mod testing {
         });
     }
 
-    pub(crate) struct DropEvent(pub(crate) Arc<Mutex<Vec<&'static str>>>, pub(crate) &'static str);
+    pub(crate) struct DropEvent(
+        pub(crate) Arc<Mutex<Vec<&'static str>>>,
+        pub(crate) &'static str,
+    );
 
     impl Drop for DropEvent {
         fn drop(&mut self) {
