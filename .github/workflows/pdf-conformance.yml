@@ -106,6 +106,7 @@ jobs:
         run: scripts/install/download_dependencies.sh --no-asr --no-chunk --with-docling-parse
 
       - name: Build
+        id: build
         shell: bash
         run: |
           scripts/ci/cargo_retry_ort.sh cargo build --release --locked -p docling-pdf --example snapshot
@@ -141,6 +142,22 @@ jobs:
             echo "::warning file=docs/PDF_CONFORMANCE.md::groundtruth reads $got strict, the doc's headline says $doc — refresh the Current state table"
           fi
 
+      # Focused opt-in trace smoke; keep the stock snapshot/groundtruth steps
+      # intact, and run this even if their assertions fail after a good build.
+      - name: ORT profiling collision smoke (real one-page fixture)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        timeout-minutes: 20
+        run: python3 scripts/conformance/ort_profile_smoke.py --out "${{ runner.temp }}/ort-profile-smoke"
+
+      - name: Upload profiling smoke receipt and traces
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ort-profile-smoke-${{ github.sha }}
+          path: ${{ runner.temp }}/ort-profile-smoke
+          retention-days: 14
+          if-no-files-found: ignore
+
       # actions/cache saves target/ in its post-step, i.e. after this runs:
       # drop what is cheap to recreate so the cache stays under the runner's
       # disk headroom (the compiled library deps are what's worth keeping).
@@ -151,3 +168,4 @@ jobs:
           rm -rf target/debug/examples target/debug/incremental \
                  target/release/examples target/release/incremental
           find target/debug target/release -maxdepth 1 -type f ! -name '*.d' -size +5M -exec rm -f {} + 2>/dev/null || true
+

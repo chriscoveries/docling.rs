@@ -58,6 +58,8 @@
 #[cfg(all(target_os = "linux", target_env = "gnu", not(feature = "load-dynamic")))]
 mod glibc_compat;
 
+mod profile;
+
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
@@ -1328,22 +1330,23 @@ pub fn cap_before_1_29(builder: SessionBuilder) -> Result<SessionBuilder, String
 }
 
 /// `DOCLING_RS_ORT_PROFILE=<dir>`: have ONNX Runtime write its per-operator
-/// profile of every run of this session to `<dir>/<model stem>_<timestamp>.json`
+/// profile to `<dir>/run-<unique id>/<model stem>-s<sequence>_<timestamp>.json`
 /// (ORT's Chrome-trace JSON, one `model_run` event per run and one
 /// `*_kernel_time` event per node). Off unless the variable names a
-/// directory; a session option, so it costs nothing otherwise. Summarize a
-/// file with `scripts/dev/ort_profile_summary.py`. The profile is written when
-/// the session is dropped — a process that is killed loses it.
+/// directory; no filesystem work otherwise. Summarize a file with
+/// `scripts/dev/ort_profile_summary.py`. Each session-creation attempt has
+/// its own prefix, including graph-cache retries. Run directories remain
+/// reserved so concurrent/restarted processes cannot overwrite older traces.
+/// The profile is written when the session is dropped — a process that is
+/// killed loses it. An unusable destination warns and skips profiling, not
+/// conversion.
 fn with_profile(builder: SessionBuilder, model_path: &Path) -> Result<SessionBuilder, String> {
-    let Some(dir) = docling_core::env::nonempty("DOCLING_RS_ORT_PROFILE") else {
+    let dir = docling_core::env::nonempty("DOCLING_RS_ORT_PROFILE");
+    let Some(prefix) = profile::prefix(dir.as_deref().map(Path::new), model_path) else {
         return Ok(builder);
     };
-    let stem = model_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("session");
     builder
-        .with_profiling(Path::new(&dir).join(stem))
+        .with_profiling(prefix)
         .map_err(|e| format!("DOCLING_RS_ORT_PROFILE: {e}"))
 }
 
@@ -1384,17 +1387,20 @@ pub fn commit_uncached(
 /// Every failure on the cached path falls back to the ordinary load, so a
 /// stale or truncated entry costs one rebuild, never a wrong answer.
 pub fn commit(builder: SessionBuilder, model_path: &str, variant: &str) -> Result<Session, String> {
-    let builder = with_profile(builder, Path::new(model_path))?;
     // Every `commit_from_file` below runs under the GPU creation lock (#452);
     // on CPU there is no lock and the workers/lanes still start in parallel.
     let _guard = creation_guard();
-    let plain = |mut b: SessionBuilder| b.commit_from_file(model_path).map_err(|e| e.to_string());
+    let plain = |b: SessionBuilder| {
+        let mut b = with_profile(b, Path::new(model_path))?;
+        b.commit_from_file(model_path).map_err(|e| e.to_string())
+    };
     let Some(cache) = graph_cache_path(model_path, variant) else {
         return plain(builder);
     };
     if cache.is_file() {
-        let hit = builder
-            .clone()
+        // Profiling option errors are not evidence of an unusable graph cache.
+        let profiled = with_profile(builder.clone(), Path::new(model_path))?;
+        let hit = profiled
             .with_optimization_level(GraphOptimizationLevel::Disable)
             .map_err(|e| e.to_string())
             .and_then(|mut b| b.commit_from_file(&cache).map_err(|e| e.to_string()));
