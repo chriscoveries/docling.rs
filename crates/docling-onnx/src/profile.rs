@@ -185,8 +185,12 @@ mod tests {
     fn identical_stems_in_different_model_paths_do_not_collide() {
         let dir = TestDir::new();
         let mut runs = Runs::default();
-        let a = runs.prefix(&dir.0, Path::new("a/model.onnx"), 1, 2).unwrap();
-        let b = runs.prefix(&dir.0, Path::new("b/model.onnx"), 1, 2).unwrap();
+        let a = runs
+            .prefix(&dir.0, Path::new("a/model.onnx"), 1, 2)
+            .unwrap();
+        let b = runs
+            .prefix(&dir.0, Path::new("b/model.onnx"), 1, 2)
+            .unwrap();
         assert_eq!(a.parent(), b.parent());
         assert_eq!(a.file_name().unwrap(), "model-s1");
         assert_eq!(b.file_name().unwrap(), "model-s2");
@@ -242,7 +246,10 @@ mod tests {
             std::fs::read_to_string(first).unwrap(),
             "retained profile marker"
         );
-        assert_eq!(std::fs::read_to_string(occupied).unwrap(), "not a directory");
+        assert_eq!(
+            std::fs::read_to_string(occupied).unwrap(),
+            "not a directory"
+        );
     }
 
     #[test]
