@@ -611,14 +611,7 @@ impl DoclingMcp {
         // The permit lives as long as the work: a call the client cancels
         // drops this future, not the conversion already running, and must
         // not free a slot that conversion still occupies.
-        let mut job = tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            let result = convert(&state, &request);
-            // What the conversion freed goes back to the OS, not into the
-            // allocator's arenas (`docling::memory`).
-            docling::memory::release_free_memory();
-            result
-        });
+        let mut job = spawn_conversion(permit, move || convert(&state, &request));
         let token = ctx.meta.get_progress_token();
         let mut tick = tokio::time::interval(Duration::from_secs(10));
         tick.tick().await; // the first tick is immediate
@@ -641,6 +634,28 @@ impl DoclingMcp {
         }
     }
 }
+
+/// Keep admission and cleanup owned by the blocking work, not its async caller.
+fn spawn_conversion<F, T>(
+    permit: tokio::sync::OwnedSemaphorePermit,
+    work: F,
+) -> tokio::task::JoinHandle<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        // The work's locals and captures drop first, then the trim, then the
+        // permit. A returned response stays live; it is not free allocator slack.
+        let _trim = crate::cleanup::trim_on_drop();
+        work()
+    })
+}
+
+#[cfg(test)]
+#[path = "mcp_cleanup_tests.rs"]
+mod cleanup_tests;
 
 #[tool_router]
 impl DoclingMcp {

@@ -4,4 +4,7 @@
 //! [`mcp::run_with`] with a [`mcp::Launcher`] of its own.
 
 #[cfg(feature = "mcp")]
+mod cleanup;
+
+#[cfg(feature = "mcp")]
 pub mod mcp;
